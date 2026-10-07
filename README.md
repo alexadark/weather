@@ -8,3 +8,5 @@ A small weather page built for one question: is today a good day to go out?
 - Live rain radar from RainViewer.
 
 Data: [Open-Meteo](https://open-meteo.com) and [RainViewer](https://www.rainviewer.com). No API keys, no build step: open `index.html`.
+
+Releasing: bump `APP_VERSION` in `index.html` and `version.json` together. Installed copies then show an "Update available" button.

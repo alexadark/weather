@@ -81,6 +81,11 @@ th{color:var(--muted);font-weight:500;font-size:11px}
 
 #map{height:300px;border-radius:16px;overflow:hidden;background:var(--card)}
 .maphead{display:flex;justify-content:space-between;align-items:baseline}
+.update{position:fixed;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom) + 16px);max-width:528px;margin:0 auto;
+  display:none;align-items:center;justify-content:space-between;gap:12px;background:var(--text);color:var(--bg);
+  border-radius:14px;padding:12px 14px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.4);z-index:1000}
+.update.show{display:flex}
+.update button{border:0;background:var(--bg);color:var(--text);border-radius:999px;padding:7px 14px;font-weight:700;cursor:pointer}
 .err{background:#3a1d1d;color:#ffd0d0;padding:10px 12px;border-radius:12px;margin-top:10px}
 .loading{opacity:.5}
 footer{margin-top:24px;font-size:12px;color:var(--muted);line-height:1.5}
@@ -108,6 +113,7 @@ footer{margin-top:24px;font-size:12px;color:var(--muted);line-height:1.5}
   <p class="small muted">The last 2 hours of radar, looping. Coverage is patchy in Argentina; for the official radar see <a href="https://www.smn.gob.ar/radar" style="color:var(--rain)">SMN Argentina</a>.</p>
 
   <footer id="foot"></footer>
+  <div class="update" id="update"><span>Update available</span><button id="updateBtn">Update</button></div>
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -166,6 +172,9 @@ function hourIcon(rain, cloud, isDay, thunder) {
   if (cloud < 85) return isDay ? '⛅' : '☁️';
   return '☁️';
 }
+// Bump together with version.json on every release, so installed copies
+// see "Update available".
+const APP_VERSION = '2026.10.07-3';
 const OUT_FROM = 9;
 const SKY = { sunny: 'sunny', partly: 'some sun', bright: 'bright grey', dull: 'dull grey' };
 // Clear-sky radiation (Haurwitz model) for the hour ending at local time `iso`.
@@ -550,7 +559,7 @@ async function refresh() {
     $('foot').innerHTML = `Updated at ${new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.<br>
       Temperature and sunshine: median of ${M.length} models (${Object.values(MODELS).join(', ')}).
       Chance of rain: share of ${data.ens ? 80 : M.length} forecast runs giving at least 1 mm between 9:00 and midnight; night rain is ignored.
-      Data from Open-Meteo and RainViewer. Long-press a city to remove it.`;
+      Data from Open-Meteo and RainViewer. Long-press a city to remove it. Version ${APP_VERSION}.`;
   } catch (e) {
     $('now').innerHTML = `<div class="err">${e.message}</div>`;
   } finally {
@@ -560,7 +569,20 @@ async function refresh() {
 
 renderPlaces();
 refresh();
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); checkUpdate(); } });
+
+// ---------- updates ----------
+async function checkUpdate() {
+  try {
+    const r = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+    const { version } = await r.json();
+    if (version && version !== APP_VERSION) {
+      $('update').classList.add('show');
+      $('updateBtn').onclick = () => { location.replace(`./?v=${encodeURIComponent(version)}`); };
+    }
+  } catch {}
+}
+checkUpdate();
 </script>
 </body>
 </html>
