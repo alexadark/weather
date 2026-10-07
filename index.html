@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>My Weather</title>
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Weather">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{
+  --bg:#0f1115;--card:#171a21;--card2:#1e222b;--line:#2a2f3a;--text:#eef0f4;--muted:#9aa3b2;
+  --good:#3ecf8e;--ok:#9bd65b;--meh:#f2b84b;--bad:#ef6b6b;--rain:#4ea8ff;--sun:#ffd45e;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+body{padding:calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 24px)}
+main{max-width:560px;margin:0 auto}
+h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:22px 0 8px;font-weight:600}
+.card{background:var(--card);border-radius:16px;padding:14px}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+button{font:inherit;color:inherit}
+
+/* places */
+.places{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
+.places::-webkit-scrollbar{display:none}
+.chip{flex:none;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:7px 13px;cursor:pointer;white-space:nowrap}
+.chip.on{background:var(--text);color:var(--bg);border-color:var(--text)}
+.chip .x{margin-left:6px;opacity:.5}
+.search{display:none;margin-top:8px}
+.search.open{display:block}
+.search input{width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit}
+.results div{padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+
+/* now */
+.now{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;align-items:center}
+.now .ico{font-size:56px;line-height:1;grid-row:span 2}
+.now .t{font-size:44px;font-weight:600;line-height:1}
+.facts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}
+.fact{background:var(--card2);border-radius:12px;padding:8px;text-align:center}
+.fact b{display:block;font-size:16px}
+.verdict{margin-top:14px;font-weight:600}
+.bars{display:flex;gap:3px;align-items:flex-end;height:44px;margin-top:8px}
+.bars i{flex:1;background:var(--rain);border-radius:3px 3px 0 0;min-height:2px;opacity:.9}
+.bars i.zero{background:var(--line)}
+.barlabels{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:3px}
+
+/* hours */
+.hours{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.hours::-webkit-scrollbar{display:none}
+.h{flex:none;width:56px;background:var(--card);border-radius:12px;padding:8px 4px;text-align:center}
+.h .e{font-size:22px;margin:2px 0}
+.h .p{color:var(--rain);font-size:12px;min-height:16px}
+
+/* days */
+.day{background:var(--card);border-radius:16px;padding:12px 14px;margin-bottom:8px;cursor:pointer}
+.drow{display:grid;grid-template-columns:40px 1fr auto;gap:4px 12px;align-items:center}
+.dname{font-weight:600}
+.dname span{font-weight:400;font-size:12px;color:var(--muted);margin-left:6px}
+.dico{font-size:32px;text-align:center;grid-row:span 2}
+.dmid{font-size:13px;color:var(--muted);grid-column:2 / span 2}
+.dmid b{color:var(--text);font-weight:600}
+.badge{font-size:12px;font-weight:700;padding:4px 9px;border-radius:999px;color:#111;white-space:nowrap}
+.s-good{background:var(--good)}.s-ok{background:var(--ok)}.s-meh{background:var(--meh)}.s-bad{background:var(--bad)}
+.rel{font-size:11px;margin-top:6px;color:var(--muted)}
+.rel .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:1px}
+.detail{display:none;margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.day.open .detail{display:block}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{padding:5px 4px;text-align:right;border-bottom:1px solid var(--line)}
+td:first-child,th:first-child{text-align:left}
+th{color:var(--muted);font-weight:500;font-size:11px}
+.why{font-size:13px;color:var(--muted);margin:0 0 8px}
+
+#map{height:300px;border-radius:16px;overflow:hidden;background:var(--card)}
+.maphead{display:flex;justify-content:space-between;align-items:baseline}
+.err{background:#3a1d1d;color:#ffd0d0;padding:10px 12px;border-radius:12px;margin-top:10px}
+.loading{opacity:.5}
+footer{margin-top:24px;font-size:12px;color:var(--muted);line-height:1.5}
+</style>
+</head>
+<body>
+<main>
+  <div class="places" id="places"></div>
+  <div class="search" id="search">
+    <input id="q" placeholder="Add a city…" autocomplete="off">
+    <div class="results card" id="results" style="padding:0;margin-top:6px"></div>
+  </div>
+
+  <h2 id="placeTitle">Now</h2>
+  <div class="card" id="now">Loading…</div>
+
+  <h2>Next 24 hours</h2>
+  <div class="hours" id="hours"></div>
+
+  <h2>7 days</h2>
+  <div id="days"></div>
+
+  <h2 class="maphead"><span>Rain radar</span><span class="small" id="radarTime"></span></h2>
+  <div id="map"></div>
+  <p class="small muted">The last 2 hours of radar, looping. Coverage is patchy in Argentina; for the official radar see <a href="https://www.smn.gob.ar/radar" style="color:var(--rain)">SMN Argentina</a>.</p>
+
+  <footer id="foot"></footer>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// Models compared. How much they agree is the reliability signal.
+const MODELS = {
+  ecmwf_ifs025: 'European (ECMWF)',
+  gfs_seamless: 'American (GFS)',
+  icon_seamless: 'German (ICON)',
+  gem_seamless: 'Canadian (GEM)',
+  ukmo_seamless: 'British (UKMO)',
+  meteofrance_seamless: 'Météo-France',
+};
+const M = Object.keys(MODELS);
+const DEFAULT_PLACES = [
+  { id: 'gps', name: 'My location', gps: true },
+  { id: 'ba', name: 'Buenos Aires', lat: -34.58, lon: -58.43 },
+  { id: 'brc', name: 'Bariloche', lat: -41.13, lon: -71.31 },
+];
+
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+let places = store.get('places', DEFAULT_PLACES);
+let current = store.get('current', 'ba');
+
+// ---------- helpers ----------
+const median = (a) => {
+  const v = a.filter((x) => x != null && !Number.isNaN(x)).sort((x, y) => x - y);
+  if (!v.length) return null;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+};
+const vals = (obj, key, i) => M.map((m) => obj[`${key}_${m}`]?.[i]).filter((x) => x != null);
+const med = (obj, key, i) => median(vals(obj, key, i));
+const r0 = (x) => (x == null ? '–' : Math.round(x));
+const r1 = (x) => (x == null ? '–' : (Math.round(x * 10) / 10).toString());
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const hhmm = (iso) => iso.slice(11, 16);
+const dayName = (iso, i) => {
+  if (i === 0) return 'Today';
+  if (i === 1) return 'Tomorrow';
+  const d = new Date(iso + 'T12:00:00');
+  return d.toLocaleDateString('en-GB', { weekday: 'long' });
+};
+const dayShort = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+function hourIcon(rain, cloud, isDay, thunder) {
+  if (thunder) return '⛈️';
+  if (rain >= 0.5) return '🌧️';
+  if (rain >= 0.1) return '🌦️';
+  if (cloud < 25) return isDay ? '☀️' : '🌙';
+  if (cloud < 60) return isDay ? '🌤️' : '☁️';
+  if (cloud < 85) return isDay ? '⛅' : '☁️';
+  return '☁️';
+}
+function dayIcon(d) {
+  if (d.thunder) return '⛈️';
+  if (d.prob >= 60 && d.rain >= 3) return '🌧️';
+  if (d.prob >= 40) return '🌦️';
+  if (d.sunFrac >= 0.7) return '☀️';
+  if (d.sunFrac >= 0.45) return '🌤️';
+  if (d.sunFrac >= 0.2) return '⛅';
+  return '☁️';
+}
+
+// Day score for my taste: no rain, no grey skies,
+// no strong heat (especially humid), no strong wind.
+function scoreDay(d) {
+  let s = 10;
+  const why = [];
+  const rainPen = (d.prob / 100) * 4 + (Math.min(d.rain, 20) / 20) * 2;
+  if (rainPen >= 1) why.push(d.prob >= 50 ? 'rain likely' : 'chance of rain');
+  s -= rainPen;
+  const greyPen = (1 - d.sunFrac) * 2.5;
+  if (d.sunFrac < 0.35) why.push('grey');
+  s -= greyPen;
+  if (d.feelsMax > 27) {
+    s -= Math.min((d.feelsMax - 27) * 0.5, 3);
+    why.push(d.dewMax >= 18 ? 'hot and humid' : 'hot');
+  }
+  if (d.dewMax >= 18 && d.tMax > 24) s -= Math.min((d.dewMax - 18) * 0.3, 1.5);
+  if (d.feelsMax < 10) { s -= Math.min((10 - d.feelsMax) * 0.3, 2); why.push('cold'); }
+  if (d.gust > 35) { s -= Math.min((d.gust - 35) / 10, 2); if (d.gust > 45) why.push('windy'); }
+  s = clamp(s, 0, 10);
+  const label = s >= 8 ? ['Great day', 's-good'] : s >= 6 ? ['Decent', 's-ok'] : s >= 4 ? ['Meh', 's-meh'] : ['Avoid', 's-bad'];
+  return { score: s, label: label[0], cls: label[1], why };
+}
+
+// Reliability: model agreement on rain and temperature.
+function reliability(d, i) {
+  const p = d.prob;
+  const rainSure = p <= 15 || p >= 85;
+  const rainMid = p <= 30 || p >= 70;
+  const tSpread = d.tSpread;
+  let level;
+  if (rainSure && tSpread <= 3) level = 2;
+  else if ((rainMid || rainSure) && tSpread <= 5) level = 1;
+  else level = 0;
+  if (i >= 5 && level === 2) level = 1;
+  return [
+    { t: 'Uncertain: the models disagree', c: 'var(--bad)' },
+    { t: 'Fairly reliable', c: 'var(--meh)' },
+    { t: 'Reliable: the models agree', c: 'var(--good)' },
+  ][level];
+}
+
+// ---------- data ----------
+async function getJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${r.status} from ${new URL(url).host}`);
+  return r.json();
+}
+
+async function load(lat, lon) {
+  const base = `latitude=${lat}&longitude=${lon}&timezone=auto`;
+  const hourlyVars = 'temperature_2m,apparent_temperature,precipitation,cloud_cover,dew_point_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,weather_code';
+  const dailyVars = 'temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,precipitation_sum,sunshine_duration,wind_gusts_10m_max,wind_speed_10m_max,weather_code';
+  const [now, multi, ens] = await Promise.all([
+    getJSON(`https://api.open-meteo.com/v1/forecast?${base}&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,precipitation,cloud_cover,is_day,weather_code&minutely_15=precipitation&forecast_minutely_15=12&daily=daylight_duration,sunrise,sunset&hourly=is_day&forecast_days=8`),
+    getJSON(`https://api.open-meteo.com/v1/forecast?${base}&hourly=${hourlyVars}&daily=${dailyVars}&models=${M.join(',')}&forecast_days=7`),
+    getJSON(`https://ensemble-api.open-meteo.com/v1/ensemble?${base}&hourly=precipitation&models=ecmwf_ifs025,gfs025&forecast_days=7`).catch(() => null),
+  ]);
+  return { now, multi, ens };
+}
+
+function buildDays({ now, multi, ens }) {
+  const D = multi.daily, H = multi.hourly;
+  const members = ens ? Object.keys(ens.hourly).filter((k) => k.startsWith('precipitation_member')) : [];
+  return D.time.map((date, i) => {
+    const hIdx = H.time.map((t, j) => (t.startsWith(date) ? j : -1)).filter((j) => j >= 0);
+    // Chance of rain: share of the 80 ensemble runs with at least 1 mm.
+    let prob;
+    if (members.length) {
+      const eIdx = ens.hourly.time.map((t, j) => (t.startsWith(date) ? j : -1)).filter((j) => j >= 0);
+      const wet = members.filter((k) => eIdx.reduce((s, j) => s + (ens.hourly[k][j] || 0), 0) >= 1).length;
+      prob = Math.round((wet / members.length) * 100);
+    } else {
+      const v = vals(D, 'precipitation_sum', i);
+      prob = Math.round((v.filter((x) => x >= 1).length / v.length) * 100);
+    }
+    const tMaxes = vals(D, 'temperature_2m_max', i);
+    const codes = vals(D, 'weather_code', i);
+    const daylight = now.daily.daylight_duration?.[i] || 43200;
+    const dayHours = hIdx.filter((j) => now.hourly?.is_day?.[now.hourly.time.indexOf(H.time[j])] === 1);
+    const dew = (dayHours.length ? dayHours : hIdx).map((j) => med(H, 'dew_point_2m', j));
+    const sun = med(D, 'sunshine_duration', i) ?? 0;
+    const d = {
+      date, i,
+      tMax: median(tMaxes), tMin: med(D, 'temperature_2m_min', i),
+      feelsMax: med(D, 'apparent_temperature_max', i), feelsMin: med(D, 'apparent_temperature_min', i),
+      rain: med(D, 'precipitation_sum', i) ?? 0,
+      prob,
+      sunH: sun / 3600, sunFrac: clamp(sun / daylight, 0, 1),
+      gust: med(D, 'wind_gusts_10m_max', i) ?? 0,
+      wind: med(D, 'wind_speed_10m_max', i) ?? 0,
+      dewMax: Math.max(...dew.filter((x) => x != null)),
+      thunder: codes.filter((c) => c >= 95).length >= Math.ceil(codes.length / 2),
+      tSpread: tMaxes.length ? Math.max(...tMaxes) - Math.min(...tMaxes) : 0,
+      perModel: M.map((m) => ({
+        name: MODELS[m],
+        rain: D[`precipitation_sum_${m}`]?.[i],
+        tMax: D[`temperature_2m_max_${m}`]?.[i],
+        sun: D[`sunshine_duration_${m}`]?.[i],
+      })).filter((x) => x.rain != null || x.tMax != null),
+      hours: hIdx.filter((j) => j % 3 === 0).map((j) => ({
+        t: hhmm(H.time[j]),
+        temp: med(H, 'temperature_2m', j),
+        feels: med(H, 'apparent_temperature', j),
+        rain: med(H, 'precipitation', j),
+        cloud: med(H, 'cloud_cover', j),
+        hum: med(H, 'relative_humidity_2m', j),
+        wind: med(H, 'wind_speed_10m', j),
+      })),
+    };
+    d.s = scoreDay(d);
+    d.rel = reliability(d, i);
+    d.icon = dayIcon(d);
+    return d;
+  });
+}
+
+// ---------- render ----------
+function renderNow(data) {
+  const c = data.now.current;
+  const mins = data.now.minutely_15;
+  const H = data.multi.hourly;
+  const ico = hourIcon(c.precipitation, c.cloud_cover, c.is_day, c.weather_code >= 95);
+  const rain = mins.precipitation.map((x) => x || 0);
+  const max = Math.max(1, ...rain);
+  // Verdict for the next 3 hours.
+  const wetNow = rain[0] >= 0.1;
+  let verdict;
+  if (wetNow) {
+    const stop = rain.findIndex((x) => x < 0.1);
+    verdict = stop === -1 ? '🌧️ Rain for at least 3 more hours' : `🌧️ Rain should stop around ${hhmm(mins.time[stop])}`;
+  } else {
+    const start = rain.findIndex((x) => x >= 0.1);
+    verdict = start === -1 ? '✅ No rain in the next 3 hours' : `☔ Rain likely around ${hhmm(mins.time[start])}`;
+  }
+  const hi = H.time.findIndex((t) => t >= c.time.slice(0, 13));
+  const dew = hi >= 0 ? med(H, 'dew_point_2m', hi) : null;
+  const muggy = dew != null && dew >= 18 ? ' · muggy' : '';
+  $('now').innerHTML = `
+    <div class="now">
+      <div class="ico">${ico}</div>
+      <div class="t">${r0(c.temperature_2m)}°</div>
+      <div class="muted">Feels like <b style="color:var(--text)">${r0(c.apparent_temperature)}°</b>${muggy}</div>
+    </div>
+    <div class="facts">
+      <div class="fact"><b>${r0(c.relative_humidity_2m)}%</b><span class="small muted">humidity</span></div>
+      <div class="fact"><b>${r0(c.wind_speed_10m)}</b><span class="small muted">wind</span></div>
+      <div class="fact"><b>${r0(c.wind_gusts_10m)}</b><span class="small muted">gusts</span></div>
+      <div class="fact"><b>${r0(c.cloud_cover)}%</b><span class="small muted">clouds</span></div>
+    </div>
+    <div class="verdict">${verdict}</div>
+    <div class="bars">${rain.map((x) => `<i class="${x < 0.05 ? 'zero' : ''}" style="height:${Math.max(4, (x / max) * 100)}%"></i>`).join('')}</div>
+    <div class="barlabels"><span>${hhmm(mins.time[0])}</span><span>${hhmm(mins.time[Math.floor(rain.length / 2)])}</span><span>${hhmm(mins.time[rain.length - 1])}</span></div>
+    <div class="small muted" style="margin-top:6px">Wind in km/h. Rain per 15 minutes. For the next hour, the radar below is more reliable.</div>`;
+}
+
+function renderHours(data) {
+  const H = data.multi.hourly;
+  const nowIso = data.now.current.time.slice(0, 13);
+  const start = Math.max(0, H.time.findIndex((t) => t >= nowIso));
+  const ens = data.ens;
+  const members = ens ? Object.keys(ens.hourly).filter((k) => k.startsWith('precipitation_member')) : [];
+  const isDay = (t) => data.now.hourly?.is_day?.[data.now.hourly.time.indexOf(t)] === 1;
+  let html = '';
+  for (let j = start; j < start + 24 && j < H.time.length; j++) {
+    const t = H.time[j];
+    const rain = med(H, 'precipitation', j);
+    let p = null;
+    if (members.length) {
+      const k = ens.hourly.time.indexOf(t);
+      if (k >= 0) p = Math.round((members.filter((m) => (ens.hourly[m][k] || 0) >= 0.1).length / members.length) * 100);
+    }
+    const thunder = vals(H, 'weather_code', j).filter((c) => c >= 95).length >= 3;
+    html += `<div class="h"><div class="small muted">${j === start ? 'Now' : hhmm(t).slice(0, 2) + ':00'}</div>
+      <div class="e">${hourIcon(rain, med(H, 'cloud_cover', j), isDay(t), thunder)}</div>
+      <div><b>${r0(med(H, 'temperature_2m', j))}°</b></div>
+      <div class="small muted">${r0(med(H, 'apparent_temperature', j))}°</div>
+      <div class="p">${p != null && p >= 10 ? p + '%' : ''}</div></div>`;
+  }
+  $('hours').innerHTML = html;
+}
+
+function renderDays(days) {
+  $('days').innerHTML = days.map((d) => `
+    <div class="day" onclick="this.classList.toggle('open')">
+      <div class="drow">
+        <div class="dico">${d.icon}</div>
+        <div class="dname">${dayName(d.date, d.i)}<span>${dayShort(d.date)}</span></div>
+        <div class="badge ${d.s.cls}">${d.s.label}</div>
+        <div class="dmid">
+          <b>${r0(d.tMin)}° / ${r0(d.tMax)}°</b> · feels ${r0(d.feelsMax)}° · 💧 ${d.prob}%${d.rain >= 0.5 ? ` ${r1(d.rain)} mm` : ''} · ☀️ ${r1(d.sunH)} h · 💨 ${r0(d.gust)} km/h
+        </div>
+      </div>
+      <div class="rel"><span class="dot" style="background:${d.rel.c}"></span>${d.rel.t}</div>
+      <div class="detail">
+        ${d.s.why.length ? `<p class="why">Why: ${d.s.why.join(', ')}.</p>` : ''}
+        <table>
+          <tr><th>Time</th><th></th><th>Temp</th><th>Feels</th><th>Rain</th><th>Humid.</th><th>Wind</th></tr>
+          ${d.hours.map((h) => `<tr><td>${h.t}</td><td>${hourIcon(h.rain, h.cloud, +h.t.slice(0, 2) >= 7 && +h.t.slice(0, 2) <= 19, false)}</td><td>${r0(h.temp)}°</td><td>${r0(h.feels)}°</td><td>${h.rain >= 0.05 ? r1(h.rain) : '–'}</td><td>${r0(h.hum)}%</td><td>${r0(h.wind)}</td></tr>`).join('')}
+        </table>
+        <h2 style="margin-top:14px">What each model says</h2>
+        <table>
+          <tr><th>Model</th><th>Max</th><th>Rain</th><th>Sun</th></tr>
+          ${d.perModel.map((m) => `<tr><td>${m.name}</td><td>${r0(m.tMax)}°</td><td>${m.rain != null ? r1(m.rain) + ' mm' : '–'}</td><td>${m.sun != null ? r1(m.sun / 3600) + ' h' : '–'}</td></tr>`).join('')}
+        </table>
+      </div>
+    </div>`).join('');
+}
+
+// ---------- radar ----------
+let map, radarLayers = [], radarTimer;
+async function renderRadar(lat, lon) {
+  if (!window.L) return;
+  if (!map) {
+    // RainViewer's free radar stops at zoom 7, so the map stays close to it.
+    map = L.map('map', { zoomControl: false, attributionControl: true, maxZoom: 9, minZoom: 4 }).setView([lat, lon], 7);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+      attribution: '© Esri, radar RainViewer', maxZoom: 9,
+    }).addTo(map);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 9, pane: 'shadowPane',
+    }).addTo(map);
+  } else {
+    map.setView([lat, lon], 7);
+  }
+  L.circleMarker([lat, lon], { radius: 5, color: '#fff', weight: 2, fillColor: '#4ea8ff', fillOpacity: 1 }).addTo(map);
+  clearInterval(radarTimer);
+  radarLayers.forEach((l) => map.removeLayer(l.layer));
+  radarLayers = [];
+  try {
+    const r = await getJSON('https://api.rainviewer.com/public/weather-maps.json');
+    const frames = r.radar.past.slice(-12);
+    radarLayers = frames.map((f) => ({
+      time: f.time,
+      layer: L.tileLayer(`${r.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`, { opacity: 0, maxNativeZoom: 7, maxZoom: 9 }).addTo(map),
+    }));
+    let k = 0;
+    const show = () => {
+      radarLayers.forEach((l, i) => l.layer.setOpacity(i === k ? 0.75 : 0));
+      const t = new Date(radarLayers[k].time * 1000);
+      $('radarTime').textContent = t.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      k = (k + 1) % radarLayers.length;
+    };
+    show();
+    radarTimer = setInterval(show, 600);
+  } catch {
+    $('radarTime').textContent = 'radar unavailable';
+  }
+}
+
+// ---------- places ----------
+function renderPlaces() {
+  $('places').innerHTML = places.map((p) => `
+    <button class="chip ${p.id === current ? 'on' : ''}" data-id="${p.id}">${p.gps ? '📍 ' : ''}${p.name}${!p.gps && p.id !== current ? '' : ''}</button>`).join('')
+    + '<button class="chip" id="add">＋</button>';
+  document.querySelectorAll('.chip[data-id]').forEach((b) => {
+    b.onclick = () => { current = b.dataset.id; store.set('current', current); renderPlaces(); refresh(); };
+    let t;
+    b.oncontextmenu = (e) => { e.preventDefault(); removePlace(b.dataset.id); };
+    b.ontouchstart = () => { t = setTimeout(() => removePlace(b.dataset.id), 700); };
+    b.ontouchend = () => clearTimeout(t);
+  });
+  $('add').onclick = () => { $('search').classList.toggle('open'); $('q').focus(); };
+}
+function removePlace(id) {
+  const p = places.find((x) => x.id === id);
+  if (!p || p.gps) return;
+  if (!confirm(`Remove ${p.name}?`)) return;
+  places = places.filter((x) => x.id !== id);
+  store.set('places', places);
+  if (current === id) { current = places[0].id; store.set('current', current); }
+  renderPlaces(); refresh();
+}
+let searchT;
+$('q').oninput = () => {
+  clearTimeout(searchT);
+  const q = $('q').value.trim();
+  if (q.length < 2) { $('results').innerHTML = ''; return; }
+  searchT = setTimeout(async () => {
+    const r = await getJSON(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=6&language=en`);
+    $('results').innerHTML = (r.results || []).map((x, i) =>
+      `<div data-i="${i}">${x.name}<span class="muted small"> · ${[x.admin1, x.country].filter(Boolean).join(', ')}</span></div>`).join('') || '<div class="muted">No results</div>';
+    $('results').querySelectorAll('[data-i]').forEach((el) => {
+      el.onclick = () => {
+        const x = r.results[+el.dataset.i];
+        const p = { id: 'p' + x.id, name: x.name, lat: x.latitude, lon: x.longitude };
+        if (!places.find((y) => y.id === p.id)) places.push(p);
+        store.set('places', places);
+        current = p.id; store.set('current', current);
+        $('q').value = ''; $('results').innerHTML = ''; $('search').classList.remove('open');
+        renderPlaces(); refresh();
+      };
+    });
+  }, 300);
+};
+
+function getPosition() {
+  return new Promise((res, rej) => {
+    if (!navigator.geolocation) return rej(new Error('Location unavailable'));
+    navigator.geolocation.getCurrentPosition(
+      (p) => res({ lat: +p.coords.latitude.toFixed(3), lon: +p.coords.longitude.toFixed(3) }),
+      () => rej(new Error('Location denied: allow location access or pick a city')),
+      { timeout: 10000, maximumAge: 600000 });
+  });
+}
+
+// ---------- loading ----------
+async function refresh() {
+  const p = places.find((x) => x.id === current) || places[1];
+  document.body.classList.add('loading');
+  $('placeTitle').textContent = `Now · ${p.name}`;
+  try {
+    const loc = p.gps ? await getPosition() : p;
+    const data = await load(loc.lat, loc.lon);
+    renderNow(data);
+    renderHours(data);
+    renderDays(buildDays(data));
+    renderRadar(loc.lat, loc.lon);
+    $('foot').innerHTML = `Updated at ${new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.<br>
+      Temperature and sunshine: median of ${M.length} models (${Object.values(MODELS).join(', ')}).
+      Chance of rain: share of ${data.ens ? 80 : M.length} forecast runs giving at least 1 mm that day.
+      Data from Open-Meteo and RainViewer. Long-press a city to remove it.`;
+  } catch (e) {
+    $('now').innerHTML = `<div class="err">${e.message}</div>`;
+  } finally {
+    document.body.classList.remove('loading');
+  }
+}
+
+renderPlaces();
+refresh();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+</script>
+</body>
+</html>
