@@ -182,6 +182,7 @@ function scoreDay(d) {
   const why = [];
   const rainPen = (d.prob / 100) * 4 + (Math.min(d.rain, 20) / 20) * 2;
   if (rainPen >= 1) why.push(d.prob >= 50 ? 'rain likely' : 'chance of rain');
+  else if (d.rain >= 0.2) why.push('possible drizzle');
   s -= rainPen;
   const greyPen = (1 - d.sunFrac) * 2.5;
   if (d.sunFrac < 0.35) why.push('grey');
@@ -256,13 +257,17 @@ function buildDays({ now, multi, ens }) {
     const dayHours = hIdx.filter((j) => now.hourly?.is_day?.[now.hourly.time.indexOf(H.time[j])] === 1);
     const dew = (dayHours.length ? dayHours : hIdx).map((j) => med(H, 'dew_point_2m', j));
     const sun = med(D, 'sunshine_duration', i) ?? 0;
+    // "Sunshine" counts sun through thin high cloud, so an overcast day can still
+    // score hours of sun. Blend it with daytime cloud cover to judge grey skies.
+    const cloudDay = median((dayHours.length ? dayHours : hIdx).map((j) => med(H, 'cloud_cover', j))) ?? 0;
+    const sunRaw = clamp(sun / daylight, 0, 1);
     const d = {
       date, i,
       tMax: median(tMaxes), tMin: med(D, 'temperature_2m_min', i),
       feelsMax: med(D, 'apparent_temperature_max', i), feelsMin: med(D, 'apparent_temperature_min', i),
       rain: med(D, 'precipitation_sum', i) ?? 0,
       prob,
-      sunH: sun / 3600, sunFrac: clamp(sun / daylight, 0, 1),
+      cloud: cloudDay, sunFrac: (sunRaw + (1 - cloudDay / 100)) / 2,
       gust: med(D, 'wind_gusts_10m_max', i) ?? 0,
       wind: med(D, 'wind_speed_10m_max', i) ?? 0,
       dewMax: Math.max(...dew.filter((x) => x != null)),
@@ -364,7 +369,7 @@ function renderDays(days) {
         <div class="dname">${dayName(d.date, d.i)}<span>${dayShort(d.date)}</span></div>
         <div class="badge ${d.s.cls}">${d.s.label}</div>
         <div class="dmid">
-          <b>${r0(d.tMin)}° / ${r0(d.tMax)}°</b> · feels ${r0(d.feelsMax)}° · 💧 ${d.prob}%${d.rain >= 0.5 ? ` ${r1(d.rain)} mm` : ''} · ☀️ ${r1(d.sunH)} h · 💨 ${r0(d.gust)} km/h
+          <b>${r0(d.tMin)}° / ${r0(d.tMax)}°</b> · feels ${r0(d.feelsMax)}° · 💧 ${d.prob}%${d.rain >= 0.5 ? ` ${r1(d.rain)} mm` : ''} · ☁️ ${r0(d.cloud)}% · 💨 ${r0(d.gust)} km/h
         </div>
       </div>
       <div class="rel"><span class="dot" style="background:${d.rel.c}"></span>${d.rel.t}</div>
