@@ -68,6 +68,7 @@ button{font:inherit;color:inherit}
 .dmid b{color:var(--text);font-weight:600}
 .badge{font-size:12px;font-weight:700;padding:4px 9px;border-radius:999px;color:#111;white-space:nowrap}
 .s-good{background:var(--good)}.s-ok{background:var(--ok)}.s-meh{background:var(--meh)}.s-bad{background:var(--bad)}
+.sum{font-size:13px;margin-top:8px}
 .rel{font-size:11px;margin-top:6px;color:var(--muted)}
 .rel .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:1px}
 .detail{display:none;margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
@@ -165,14 +166,28 @@ function hourIcon(rain, cloud, isDay, thunder) {
   if (cloud < 85) return isDay ? '⛅' : '☁️';
   return '☁️';
 }
+const OUT_FROM = 9;
+const SKY = { sunny: 'sunny', partly: 'some sun', bright: 'bright grey', dull: 'dull grey' };
+// Clear-sky radiation (Haurwitz model) for the hour ending at local time `iso`.
+function clearSky(iso, offset, lat, lon) {
+  const t = new Date(Date.parse(iso + 'Z') - offset * 1000 - 30 * 60000);
+  const n = Math.floor((t - Date.UTC(t.getUTCFullYear(), 0, 0)) / 864e5);
+  const g = (2 * Math.PI / 365) * (n - 1 + (t.getUTCHours() - 12) / 24);
+  const decl = 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g) - 0.006758 * Math.cos(2 * g) + 0.000907 * Math.sin(2 * g);
+  const eq = 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g) - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g));
+  const ha = ((t.getUTCHours() * 60 + t.getUTCMinutes() + eq + 4 * lon) / 4 - 180) * Math.PI / 180;
+  const la = lat * Math.PI / 180;
+  const cz = Math.sin(la) * Math.sin(decl) + Math.cos(la) * Math.cos(decl) * Math.cos(ha);
+  return cz <= 0 ? 0 : 1098 * cz * Math.exp(-0.057 / cz);
+}
 function dayIcon(d) {
   if (d.thunder) return '⛈️';
   if (d.prob >= 60 && d.rain >= 3) return '🌧️';
   if (d.prob >= 40) return '🌦️';
-  if (d.sunFrac >= 0.7) return '☀️';
-  if (d.sunFrac >= 0.45) return '🌤️';
-  if (d.sunFrac >= 0.2) return '⛅';
-  return '☁️';
+  if (d.sky === 'dull') return '☁️';
+  if (d.sky === 'bright') return '🌥️';
+  if (d.sky === 'partly') return '⛅';
+  return d.cloud < 40 ? '☀️' : '🌤️';
 }
 
 // Day score for my taste: no rain, no grey skies,
@@ -184,9 +199,11 @@ function scoreDay(d) {
   if (rainPen >= 1) why.push(d.prob >= 50 ? 'rain likely' : 'chance of rain');
   else if (d.rain >= 0.2) why.push('possible drizzle');
   s -= rainPen;
-  const greyPen = (1 - d.sunFrac) * 2.5;
-  if (d.sunFrac < 0.35) why.push('grey');
-  s -= greyPen;
+  // A bright grey sky is pleasant; a dull dark one is what hurts.
+  const b = d.light;
+  s -= b >= 0.5 ? (1 - b) * 1.5 : 0.75 + (0.5 - b) * 6;
+  if (d.sky === 'dull') why.push('dull grey');
+  else if (d.sky === 'bright') why.push('bright grey');
   if (d.feelsMax > 27) {
     s -= Math.min((d.feelsMax - 27) * 0.5, 3);
     why.push(d.dewMax >= 18 ? 'hot and humid' : 'hot');
@@ -226,7 +243,7 @@ async function getJSON(url) {
 
 async function load(lat, lon) {
   const base = `latitude=${lat}&longitude=${lon}&timezone=auto`;
-  const hourlyVars = 'temperature_2m,apparent_temperature,precipitation,cloud_cover,dew_point_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,weather_code';
+  const hourlyVars = 'temperature_2m,apparent_temperature,precipitation,cloud_cover,dew_point_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,weather_code,shortwave_radiation';
   const dailyVars = 'temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,precipitation_sum,sunshine_duration,wind_gusts_10m_max,wind_speed_10m_max,weather_code';
   const [now, multi, ens] = await Promise.all([
     getJSON(`https://api.open-meteo.com/v1/forecast?${base}&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,precipitation,cloud_cover,is_day,weather_code&minutely_15=precipitation&forecast_minutely_15=12&daily=daylight_duration,sunrise,sunset&hourly=is_day&forecast_days=8`),
@@ -236,38 +253,69 @@ async function load(lat, lon) {
   return { now, multi, ens };
 }
 
+// One-line plain summary of the day, built from rules (no AI needed).
+function summarize(d) {
+  const sky = { sunny: 'Sunny', partly: 'Sun and clouds', bright: 'Bright grey sky', dull: 'Dull grey sky' }[d.sky];
+  let rain;
+  const w = d.wetHours;
+  if (w.length >= 8) rain = 'rain on and off all day';
+  else if (w.length) {
+    const from = w[0], to = w[w.length - 1] + 1;
+    rain = `rain likely ${String(from).padStart(2, '0')}:00–${String(to % 24).padStart(2, '0')}:00`;
+  } else if (d.prob >= 30) rain = 'a chance of showers';
+  else rain = d.rainNight >= 1 ? 'dry once the night rain clears' : 'dry';
+  const f = d.feelsMax;
+  let feel = f < 10 ? 'cold' : f < 16 ? 'cool' : f < 24 ? 'mild' : f < 28 ? 'warm' : 'hot';
+  if (d.dewMax >= 20 && d.tMax >= 26) feel += ' and sticky';
+  const parts = [`${sky}, ${rain}.`, `${feel[0].toUpperCase() + feel.slice(1)}, up to ${r0(d.tMax)}°`];
+  if (d.eve != null) parts[1] += `, ${r0(d.eve)}° at 9 pm`;
+  parts[1] += d.gust >= 50 ? ', very windy.' : d.gust >= 40 ? ', windy.' : '.';
+  return parts.join(' ');
+}
+
 function buildDays({ now, multi, ens }) {
   const D = multi.daily, H = multi.hourly;
   const members = ens ? Object.keys(ens.hourly).filter((k) => k.startsWith('precipitation_member')) : [];
   return D.time.map((date, i) => {
     const hIdx = H.time.map((t, j) => (t.startsWith(date) ? j : -1)).filter((j) => j >= 0);
-    // Chance of rain: share of the 80 ensemble runs with at least 1 mm.
+    // Only rain while I'm likely to be out counts (09:00 to midnight).
+    // Chance of rain: share of the 80 ensemble runs with at least 1 mm in those hours.
+    const isOut = (t) => +t.slice(11, 13) >= OUT_FROM;
+    const outIdx = hIdx.filter((j) => isOut(H.time[j]));
     let prob;
     if (members.length) {
-      const eIdx = ens.hourly.time.map((t, j) => (t.startsWith(date) ? j : -1)).filter((j) => j >= 0);
+      const eIdx = ens.hourly.time.map((t, j) => (t.startsWith(date) && isOut(t) ? j : -1)).filter((j) => j >= 0);
       const wet = members.filter((k) => eIdx.reduce((s, j) => s + (ens.hourly[k][j] || 0), 0) >= 1).length;
       prob = Math.round((wet / members.length) * 100);
     } else {
-      const v = vals(D, 'precipitation_sum', i);
+      const v = M.map((m) => outIdx.reduce((s, j) => s + (H[`precipitation_${m}`]?.[j] || 0), 0));
       prob = Math.round((v.filter((x) => x >= 1).length / v.length) * 100);
     }
+    const hourRain = (j) => med(H, 'precipitation', j) ?? 0;
+    const rainOut = outIdx.reduce((s, j) => s + hourRain(j), 0);
+    const rainNight = hIdx.filter((j) => !isOut(H.time[j])).reduce((s, j) => s + hourRain(j), 0);
+    const wetHours = outIdx.filter((j) => hourRain(j) >= 0.2).map((j) => +H.time[j].slice(11, 13));
+    const at21 = hIdx.find((j) => H.time[j].slice(11, 13) === '21');
     const tMaxes = vals(D, 'temperature_2m_max', i);
     const codes = vals(D, 'weather_code', i);
-    const daylight = now.daily.daylight_duration?.[i] || 43200;
     const dayHours = hIdx.filter((j) => now.hourly?.is_day?.[now.hourly.time.indexOf(H.time[j])] === 1);
     const dew = (dayHours.length ? dayHours : hIdx).map((j) => med(H, 'dew_point_2m', j));
-    const sun = med(D, 'sunshine_duration', i) ?? 0;
-    // "Sunshine" counts sun through thin high cloud, so an overcast day can still
-    // score hours of sun. Blend it with daytime cloud cover to judge grey skies.
-    const cloudDay = median((dayHours.length ? dayHours : hIdx).map((j) => med(H, 'cloud_cover', j))) ?? 0;
-    const sunRaw = clamp(sun / daylight, 0, 1);
+    // Light = solar radiation reaching the ground vs a clear sky, 10:00-17:00.
+    // It tells a bright overcast from a dull dark one, which cloud % cannot.
+    const mid = hIdx.filter((j) => { const h = +H.time[j].slice(11, 13); return h >= 10 && h <= 17; });
+    const got = mid.reduce((a, j) => a + (median(vals(H, 'shortwave_radiation', j).filter((x) => x <= 1200)) ?? 0), 0);
+    const clr = mid.reduce((a, j) => a + clearSky(H.time[j], multi.utc_offset_seconds, multi.latitude, multi.longitude), 0);
+    const light = clr ? clamp(got / clr, 0, 1) : 0.5;
+    const cloudDay = median(mid.map((j) => med(H, 'cloud_cover', j))) ?? 0;
+    const sky = light >= 0.75 ? 'sunny' : light >= 0.5 ? (cloudDay >= 70 ? 'bright' : 'partly') : 'dull';
     const d = {
       date, i,
       tMax: median(tMaxes), tMin: med(D, 'temperature_2m_min', i),
       feelsMax: med(D, 'apparent_temperature_max', i), feelsMin: med(D, 'apparent_temperature_min', i),
-      rain: med(D, 'precipitation_sum', i) ?? 0,
+      rain: rainOut, rainNight, wetHours,
+      eve: at21 != null ? med(H, 'temperature_2m', at21) : null,
       prob,
-      cloud: cloudDay, sunFrac: (sunRaw + (1 - cloudDay / 100)) / 2,
+      cloud: cloudDay, light, sky,
       gust: med(D, 'wind_gusts_10m_max', i) ?? 0,
       wind: med(D, 'wind_speed_10m_max', i) ?? 0,
       dewMax: Math.max(...dew.filter((x) => x != null)),
@@ -292,6 +340,7 @@ function buildDays({ now, multi, ens }) {
     d.s = scoreDay(d);
     d.rel = reliability(d, i);
     d.icon = dayIcon(d);
+    d.summary = summarize(d);
     return d;
   });
 }
@@ -369,9 +418,10 @@ function renderDays(days) {
         <div class="dname">${dayName(d.date, d.i)}<span>${dayShort(d.date)}</span></div>
         <div class="badge ${d.s.cls}">${d.s.label}</div>
         <div class="dmid">
-          <b>${r0(d.tMin)}° / ${r0(d.tMax)}°</b> · feels ${r0(d.feelsMax)}° · 💧 ${d.prob}%${d.rain >= 0.5 ? ` ${r1(d.rain)} mm` : ''} · ☁️ ${r0(d.cloud)}% · 💨 ${r0(d.gust)} km/h
+          <b>${r0(d.tMin)}° / ${r0(d.tMax)}°</b> · feels ${r0(d.feelsMax)}° · 💧 ${d.prob}%${d.rain >= 0.5 ? ` ${r1(d.rain)} mm` : ''} · ${SKY[d.sky]} · 💨 ${r0(d.gust)} km/h
         </div>
       </div>
+      <div class="sum">${d.summary}</div>
       <div class="rel"><span class="dot" style="background:${d.rel.c}"></span>${d.rel.t}</div>
       <div class="detail">
         ${d.s.why.length ? `<p class="why">Why: ${d.s.why.join(', ')}.</p>` : ''}
@@ -499,7 +549,7 @@ async function refresh() {
     renderRadar(loc.lat, loc.lon);
     $('foot').innerHTML = `Updated at ${new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.<br>
       Temperature and sunshine: median of ${M.length} models (${Object.values(MODELS).join(', ')}).
-      Chance of rain: share of ${data.ens ? 80 : M.length} forecast runs giving at least 1 mm that day.
+      Chance of rain: share of ${data.ens ? 80 : M.length} forecast runs giving at least 1 mm between 9:00 and midnight; night rain is ignored.
       Data from Open-Meteo and RainViewer. Long-press a city to remove it.`;
   } catch (e) {
     $('now').innerHTML = `<div class="err">${e.message}</div>`;
