@@ -11,7 +11,6 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-180.png">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
 :root{
   --bg:#0f1115;--card:#171a21;--card2:#1e222b;--line:#2a2f3a;--text:#eef0f4;--muted:#9aa3b2;
@@ -79,8 +78,7 @@ td:first-child,th:first-child{text-align:left}
 th{color:var(--muted);font-weight:500;font-size:11px}
 .why{font-size:13px;color:var(--muted);margin:0 0 8px}
 
-#map{height:300px;border-radius:16px;overflow:hidden;background:var(--card)}
-.maphead{display:flex;justify-content:space-between;align-items:baseline}
+.radar{display:inline-block;margin-top:10px;color:var(--rain);text-decoration:none;font-weight:600}
 .update{position:fixed;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom) + 16px);max-width:528px;margin:0 auto;
   display:none;align-items:center;justify-content:space-between;gap:12px;background:var(--text);color:var(--bg);
   border-radius:14px;padding:12px 14px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.4);z-index:1000}
@@ -108,15 +106,10 @@ footer{margin-top:24px;font-size:12px;color:var(--muted);line-height:1.5}
   <h2>7 days</h2>
   <div id="days"></div>
 
-  <h2 class="maphead"><span>Rain radar</span><span class="small" id="radarTime"></span></h2>
-  <div id="map"></div>
-  <p class="small muted">The last 2 hours of radar, looping. Coverage is patchy in Argentina; for the official radar see <a href="https://www.smn.gob.ar/radar" style="color:var(--rain)">SMN Argentina</a>.</p>
-
   <footer id="foot"></footer>
   <div class="update" id="update"><span>Update available</span><button id="updateBtn">Update</button></div>
 </main>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 // Models compared. How much they agree is the reliability signal.
 const MODELS = {
@@ -174,7 +167,7 @@ function hourIcon(rain, cloud, isDay, thunder) {
 }
 // Bump together with version.json on every release, so installed copies
 // see "Update available".
-const APP_VERSION = '2026.10.07-3';
+const APP_VERSION = '2026.10.07-4';
 const OUT_FROM = 9;
 const SKY = { sunny: 'sunny', partly: 'some sun', bright: 'bright grey', dull: 'dull grey' };
 // Clear-sky radiation (Haurwitz model) for the hour ending at local time `iso`.
@@ -390,7 +383,8 @@ function renderNow(data) {
     <div class="verdict">${verdict}</div>
     <div class="bars">${rain.map((x) => `<i class="${x < 0.05 ? 'zero' : ''}" style="height:${Math.max(4, (x / max) * 100)}%"></i>`).join('')}</div>
     <div class="barlabels"><span>${hhmm(mins.time[0])}</span><span>${hhmm(mins.time[Math.floor(rain.length / 2)])}</span><span>${hhmm(mins.time[rain.length - 1])}</span></div>
-    <div class="small muted" style="margin-top:6px">Wind in km/h. Rain per 15 minutes. For the next hour, the radar below is more reliable.</div>`;
+    <div class="small muted" style="margin-top:6px">Wind in km/h. Rain per 15 minutes. For the next hour, the live radar is more reliable.</div>
+    <a class="radar" href="${radarUrl(data.lat, data.lon)}" target="_blank" rel="noopener">Live rain radar ↗</a>`;
 }
 
 function renderHours(data) {
@@ -448,44 +442,10 @@ function renderDays(days) {
 }
 
 // ---------- radar ----------
-let map, radarLayers = [], radarTimer;
-async function renderRadar(lat, lon) {
-  if (!window.L) return;
-  if (!map) {
-    // RainViewer's free radar stops at zoom 7, so the map stays close to it.
-    map = L.map('map', { zoomControl: false, attributionControl: true, maxZoom: 9, minZoom: 4 }).setView([lat, lon], 7);
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-      attribution: '© Esri, radar RainViewer', maxZoom: 9,
-    }).addTo(map);
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 9, pane: 'shadowPane',
-    }).addTo(map);
-  } else {
-    map.setView([lat, lon], 7);
-  }
-  L.circleMarker([lat, lon], { radius: 5, color: '#fff', weight: 2, fillColor: '#4ea8ff', fillOpacity: 1 }).addTo(map);
-  clearInterval(radarTimer);
-  radarLayers.forEach((l) => map.removeLayer(l.layer));
-  radarLayers = [];
-  try {
-    const r = await getJSON('https://api.rainviewer.com/public/weather-maps.json');
-    const frames = r.radar.past.slice(-12);
-    radarLayers = frames.map((f) => ({
-      time: f.time,
-      layer: L.tileLayer(`${r.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`, { opacity: 0, maxNativeZoom: 7, maxZoom: 9 }).addTo(map),
-    }));
-    let k = 0;
-    const show = () => {
-      radarLayers.forEach((l, i) => l.layer.setOpacity(i === k ? 0.75 : 0));
-      const t = new Date(radarLayers[k].time * 1000);
-      $('radarTime').textContent = t.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-      k = (k + 1) % radarLayers.length;
-    };
-    show();
-    radarTimer = setInterval(show, 600);
-  } catch {
-    $('radarTime').textContent = 'radar unavailable';
-  }
+// Free radar maps cover Argentina badly, so link out to the best live radar instead.
+function radarUrl(lat, lon) {
+  const inArgentina = lat < -21 && lat > -56 && lon > -74 && lon < -53;
+  return inArgentina ? 'https://www.smn.gob.ar/radar' : `https://www.rainviewer.com/map.html?loc=${lat},${lon},8`;
 }
 
 // ---------- places ----------
@@ -552,14 +512,14 @@ async function refresh() {
   try {
     const loc = p.gps ? await getPosition() : p;
     const data = await load(loc.lat, loc.lon);
+    data.lat = loc.lat; data.lon = loc.lon;
     renderNow(data);
     renderHours(data);
     renderDays(buildDays(data));
-    renderRadar(loc.lat, loc.lon);
     $('foot').innerHTML = `Updated at ${new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.<br>
       Temperature and sunshine: median of ${M.length} models (${Object.values(MODELS).join(', ')}).
       Chance of rain: share of ${data.ens ? 80 : M.length} forecast runs giving at least 1 mm between 9:00 and midnight; night rain is ignored.
-      Data from Open-Meteo and RainViewer. Long-press a city to remove it. Version ${APP_VERSION}.`;
+      Data from Open-Meteo. Long-press a city to remove it. Version ${APP_VERSION}.`;
   } catch (e) {
     $('now').innerHTML = `<div class="err">${e.message}</div>`;
   } finally {
